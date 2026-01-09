@@ -346,11 +346,29 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   // // One-cycle latency
   // `FF(rram_rvalid, rram_req, 1'b0);
 
-  // RRAM latency delay chain (3 cycles using FF)
-  logic rram_req_d1, rram_req_d2;
-  `FF(rram_req_d1, rram_req, 1'b0);
-  `FF(rram_req_d2, rram_req_d1, 1'b0);
-  `FF(rram_rvalid, rram_req_d2, 1'b0);
+  // // RRAM latency delay chain (3 cycles using FF)
+  // logic rram_req_d1, rram_req_d2;
+  // `FF(rram_req_d1, rram_req, 1'b0);
+  // `FF(rram_req_d2, rram_req_d1, 1'b0);
+  // `FF(rram_rvalid, rram_req_d2, 1'b0);
+
+  logic [RRAMLatency-1:0] rram_req_delay;
+
+  // First stage: delay from rram_req
+  `FF(rram_req_delay[0], rram_req, 1'b0);
+  
+  // Generate intermediate delay stages if RRAMLatency > 1
+  genvar i;
+  generate
+    if (RRAMLatency > 1) begin: gen_rram_delay_chain
+      for (i = 1; i < RRAMLatency; i++) begin : gen_delay_stage
+        `FF(rram_req_delay[i], rram_req_delay[i-1], 1'b0);
+      end
+    end
+  endgenerate
+  
+  // Last stage: rram_rvalid form the last delay stage
+  `FF(rram_rvalid, rram_req_delay[RRAMLatency-1], 1'b0);
 
   ////////////
   //  UART  //

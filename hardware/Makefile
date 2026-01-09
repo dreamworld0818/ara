@@ -236,9 +236,9 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
 .PHONY: simv
 simv:
 ifeq ($(ideal_dispatcher), 1)
-	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -E ram,$(app_path)/$(app).ideal
+	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -E $(app_path)/$(app).ideal
 else
-	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -E ram,$(app_path)/$(app)
+	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -E $(app_path)/$(app)
 endif
 
 .PHONY: riscv_tests_simv

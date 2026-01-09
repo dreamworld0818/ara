@@ -91,7 +91,8 @@ module ara_tb;
     .VLEN        (VLEN            ),
     .AxiAddrWidth(AxiAddrWidth    ),
     .AxiDataWidth(AxiWideDataWidth),
-    .AxiRespDelay(AxiRespDelay    )
+    .AxiRespDelay(AxiRespDelay    ),
+    .RRAMLatency(RRAMLatency    )
   ) dut (
     .clk_i (clk  ),
     .rst_ni(rst_n),
