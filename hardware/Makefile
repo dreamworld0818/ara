@@ -244,6 +244,8 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
   -Wno-COMBDLY                                                                  \
   tb/verilator/waiver.vlt                                                       \
   --Mdir $(veril_library)                                                       \
+  -I$(ROOT_DIR)/deps/tensor-core/src/sv/mesh                                    \
+  -I$(ROOT_DIR)/deps/tensor-core/src/sv/tensor_core_components                  \
   -Itb/dpi                                                                      \
   --compiler clang                                                              \
   -CFLAGS "-DTOPLEVEL_NAME=$(veril_top)"                                        \

@@ -609,7 +609,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .AxiAddrWidth      (AxiAddrWidth         ),
     .AxiIdWidth        (AxiCoreIdWidth       ),
     .AxiNarrowDataWidth(AxiNarrowDataWidth   ),
-    .AxiWideDataWidth  (32*NrLanes           ),
+    .AxiWideDataWidth  (tc_pkg::AXI_DATA_WIDTH           ),
     .ara_axi_ar_t      (ara_axi_ar_chan_t    ),
     .ara_axi_aw_t      (ara_axi_aw_chan_t    ),
     .ara_axi_b_t       (ara_axi_b_chan_t     ),
