@@ -246,36 +246,6 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     .axi_slv_resp_o   (axi_slv_resp_o        )
   );
 
-  axi_dw_converter #(
-    .AxiSlvPortDataWidth(AxiNarrowDataWidth),
-    .AxiMstPortDataWidth(AxiWideDataWidth  ),
-    .AxiAddrWidth       (AxiAddrWidth      ),
-    .AxiIdWidth         (AxiIdWidth        ),
-    .AxiMaxReads        (2                 ),
-    .ar_chan_t          (tc_pkg::axi_mst_ar_chan_t   ),
-    .mst_r_chan_t       (ara_axi_r_t       ),
-    .slv_r_chan_t       (tc_pkg::axi_mst_r_chan_t    ),
-    .aw_chan_t          (tc_pkg::axi_mst_aw_chan_t   ),
-    .b_chan_t           (tc_pkg::axi_mst_b_chan_t    ),
-    .mst_w_chan_t       (ara_axi_w_t       ),
-    .slv_w_chan_t       (tc_pkg::axi_mst_w_chan_t    ),
-    .axi_mst_req_t      (ara_axi_req_t     ),
-    .axi_mst_resp_t     (ara_axi_resp_t    ),
-    .axi_slv_req_t      (tc_pkg::axi_mst_req_t  ),
-    .axi_slv_resp_t     (tc_pkg::axi_mst_resp_t )
-  ) i_ara_tc_dwc (
-    .clk_i     (clk_i                 ),
-    .rst_ni    (rst_ni                ),
-`ifdef IDEAL_DISPATCHER
-    .slv_req_i ('0                    ),
-`else
-    .slv_req_i (tc_mst_req ),
-`endif
-    .slv_resp_o(tc_mst_resp),
-    .mst_req_o (tc_axi_mst_req        ),
-    .mst_resp_i(tc_axi_mst_resp       )
-  );
-
   axi_mux #(
     .SlvAxiIDWidth(AxiAccIdWidth        ),
     .slv_ar_chan_t(ara_axi_ar_t),
