@@ -9,13 +9,19 @@
   - `hardware\tb\verilator\ara_tb.cpp` ：
   
     把 `memutil.RegisterMemoryArea` 函数参数从32*NR_LANES改为1024。
+
   - `hardware\tb\verilator\lowrisc_dv_verilator_memutil_dpi\cpp\dpi_memutil.cc` ：
   
     删掉一些限制位宽的assert，调整`minbuf`数组大小适配128的width_byte。
 
   - `hardware\deps\tech_cells_generic\src\rtl\tc_sram.cc` :
   
-     把 `simutil_set_mem` 和 `simutil_get_mem` 函数的val数组大小从512改为1024。
+    把 `simutil_set_mem` 和 `simutil_get_mem` 函数的val数组大小从512改为1024。
+
+  - `hardware\src\ara_soc.sv` :
+
+    把 `ara_system` 模块的 `AxiWideDataWidth` 参数从32*NR_LANES改为1024。
+    相当于把ara的数据宽度改成1024，所以也去掉了一个原本 `ara_system.sv` 里用来转换ara数据宽度的 `axi_dw_converter` 。现在ara_system里只有cva6的数据宽度不是1024。
 
 ## 2. Makefile
 - 在原本的`make verilate`编译指令里加上 
