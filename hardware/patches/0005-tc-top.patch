@@ -1,0 +1,14 @@
+diff --git a/src/sv/tensor_core_components/tc_top.sv b/src/sv/tensor_core_components/tc_top.sv
+index 44da19c..efed7a7 100644
+--- a/src/sv/tensor_core_components/tc_top.sv
++++ b/src/sv/tensor_core_components/tc_top.sv
+@@ -95,7 +95,8 @@ module tc_top(
+     //-------------------------------------------------------------------------
+ 
+     tc_controller #(
+-        .BUFFER_NUM(5)
++        .BUFFER_NUM(5),
++	.SLV_REGISTER_ADDR(32'hD000_1000)
+     ) u_tc_controller (
+         .clk_i(clk_i),
+         .rst_ni(rst_ni),

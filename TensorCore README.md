@@ -42,6 +42,29 @@
 
 测试正常得到的输出如下：
 ```
+[TensorCore] Write instruction[0] = 0x0200030000100004
+[TensorCore] Write instruction[1] = 0x0100000000100004
+[TensorCore] Write instruction[2] = 0x0800050000100002
+[TensorCore] Write instruction[3] = 0x02000b0000100004
+[TensorCore] Write instruction[4] = 0x0000000008020402
+[TensorCore] Complete instruction received, executing...
+
+[TensorCore] ===== GEMM Instruction Received =====
+[TensorCore] Instruction Type: 1
+[TensorCore] Matrix Dimensions: M=2, N=4, K=2
+[TensorCore] Transpose: A=0, B=0
+[TensorCore] Din: base=0x020003, stride_minor=4, stride_major=1
+[TensorCore] A:  base=0x080005, stride_minor=2, stride_major=1
+[TensorCore] B:  base=0x010000, stride_minor=4, stride_major=1
+[TensorCore] Dout: base=0x02000b, stride_minor=4, stride_major=1
+[TensorCore] Calculated Addresses:
+[TensorCore]   Din:  0x000000008000c000
+[TensorCore]   A:    0x0000000080005000
+[TensorCore]   B:    0x0000000010000000
+[TensorCore]   Dout: 0x000000008002c000
+[TensorCore] Instruction executed (count: 1)
+[TensorCore] ======================================
+
 tensorcore state: ca11ab1ebadcab1e
 M: 127, N: 254, K: 127
 M_block: 2, N_block: 4, K_block: 2
@@ -57,4 +80,5 @@ inst:
 08 00 05 00 00 10 00 02 
 01 00 00 00 00 10 00 04 
 02 00 03 00 00 10 00 04 
+
 ```

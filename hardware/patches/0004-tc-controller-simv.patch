@@ -1,0 +1,141 @@
+diff --git a/src/sv/tensor_core_components/tc_controller.sv b/src/sv/tensor_core_components/tc_controller.sv
+index c93f80e..c3d99d3 100644
+--- a/src/sv/tensor_core_components/tc_controller.sv
++++ b/src/sv/tensor_core_components/tc_controller.sv
+@@ -197,9 +197,67 @@ module tc_controller #(
+                        n_cnt_q * {{(AXI_ADDR_WIDTH-20){1'b0}}, mma_opcode_q.blocked_matrix_Dout_info.stride_major} + 
+                        m_cnt_q * {{(AXI_ADDR_WIDTH-20){1'b0}}, mma_opcode_q.blocked_matrix_Dout_info.stride_minor};
+ 
++`ifdef VERILATOR
++    reg instruction_rcvd_q;
++    reg [63:0] instruction_cnt_q;
++    wire instruction_complete;
++
++    assign instruction_complete = (w_state_q inside {W_WAIT_W, W_RECEIVING_W}) && 
++                                  axi_slv_req_i.w_valid && axi_slv_req_i.w.last && 
++                                  w_addr_match_q && (highest_byte_written_q || w_hit_last_byte);
++
++    task automatic print_instruction();
++        logic [23:0] din_base   = mma_opcode_q.blocked_matrix_Din_info.base_addr;
++        logic [19:0] din_stride_minor = mma_opcode_q.blocked_matrix_Din_info.stride_minor;
++        logic [19:0] din_stride_major = mma_opcode_q.blocked_matrix_Din_info.stride_major;
++        logic [23:0] a_base     = mma_opcode_q.blocked_matrix_A_info.base_addr;
++        logic [19:0] a_stride_minor   = mma_opcode_q.blocked_matrix_A_info.stride_minor;
++        logic [19:0] a_stride_major   = mma_opcode_q.blocked_matrix_A_info.stride_major;
++        logic [23:0] b_base     = mma_opcode_q.blocked_matrix_B_info.base_addr;
++        logic [19:0] b_stride_minor   = mma_opcode_q.blocked_matrix_B_info.stride_minor;
++        logic [19:0] b_stride_major   = mma_opcode_q.blocked_matrix_B_info.stride_major;
++        logic [23:0] dout_base  = mma_opcode_q.blocked_matrix_Dout_info.base_addr;
++        logic [19:0] dout_stride_minor= mma_opcode_q.blocked_matrix_Dout_info.stride_minor;
++        logic [19:0] dout_stride_major= mma_opcode_q.blocked_matrix_Dout_info.stride_major;
++
++        logic [7:0] M = mma_opcode_q.mma_meta.M;
++        logic [7:0] N = mma_opcode_q.mma_meta.N;
++        logic [7:0] K = mma_opcode_q.mma_meta.K;
++        logic if_A_transpose = mma_opcode_q.mma_meta.if_A_transpose;
++        logic if_B_transpose = mma_opcode_q.mma_meta.if_B_transpose;
++        logic [2:0] instruction_type = mma_opcode_q.mma_meta.instruction_type;
++
++        logic [AXI_ADDR_WIDTH-1:0] din_addr  = din_base  * 16384;
++        logic [AXI_ADDR_WIDTH-1:0] a_addr    = a_base    * 4096;
++        logic [AXI_ADDR_WIDTH-1:0] b_addr    = b_base    * 4096;
++        logic [AXI_ADDR_WIDTH-1:0] dout_addr = dout_base * 16384;
++
++        $display("\n[TensorCore] ===== GEMM Instruction Received =====");
++        $display("[TensorCore] Instruction Type: %0d", instruction_type);
++        $display("[TensorCore] Matrix Dimensions: M=%0d, N=%0d, K=%0d", M, N, K);
++        $display("[TensorCore] Transpose: A=%0d, B=%0d", if_A_transpose, if_B_transpose);
++        $display("[TensorCore] Din: base=0x%06x, stride_minor=%0d, stride_major=%0d", din_base, din_stride_minor, din_stride_major);
++        $display("[TensorCore] A:  base=0x%06x, stride_minor=%0d, stride_major=%0d", a_base, a_stride_minor, a_stride_major);
++        $display("[TensorCore] B:  base=0x%06x, stride_minor=%0d, stride_major=%0d", b_base, b_stride_minor, b_stride_major);
++        $display("[TensorCore] Dout: base=0x%06x, stride_minor=%0d, stride_major=%0d", dout_base, dout_stride_minor, dout_stride_major);
++        $display("[TensorCore] Calculated Addresses:");
++        $display("[TensorCore]   Din:  0x%016x", din_addr);
++        $display("[TensorCore]   A:    0x%016x", a_addr);
++        $display("[TensorCore]   B:    0x%016x", b_addr);
++        $display("[TensorCore]   Dout: 0x%016x", dout_addr);
++        $display("[TensorCore] Instruction executed (count: %0d)", instruction_cnt_q + 1);
++        $display("[TensorCore] ======================================\n");
++    endtask
++`endif
+ 
+     // 所有逻辑都使用时序逻辑
+     always_ff @(posedge clk_i or negedge rst_ni) begin
++    `ifdef VERILATOR
++        int offset_bytes;
++        logic [63:0] word_data;
++        int word_idx;
++    `endif
+         if (!rst_ni) begin
+             // Write state reset
+             w_state_q                 <= W_IDLE;
+@@ -250,6 +308,11 @@ module tc_controller #(
+             // SA Din FSM Reset
+             sa_din_state_q <= SA_DIN_IDLE;
+             // sa_din_delay_cnt_q <= '0; // Removed
++        `ifdef VERILATOR
++            instruction_rcvd_q <= 1'b0;
++            instruction_cnt_q <= '0;
++        `endif
+ 
+         end else begin
+             // 默认值
+@@ -272,7 +335,9 @@ module tc_controller #(
+                         // len + 1 是实际的beat数
+                         w_expected_beats_q <= axi_slv_req_i.aw.len + 1'b1;
+                         w_beat_count_q     <= '0;
+-                        w_addr_match_q     <= (axi_slv_req_i.aw.addr == SLV_REGISTER_ADDR);
++                        w_addr_match_q     <= (axi_slv_req_i.aw.addr >= SLV_REGISTER_ADDR) && 
++                                               (axi_slv_req_i.aw.addr < SLV_REGISTER_ADDR + REG_BYTES);
+                         w_is_single_beat_q <= (axi_slv_req_i.aw.len == '0);
+                         w_current_addr_q   <= axi_slv_req_i.aw.addr;
+                         w_size_q           <= axi_slv_req_i.aw.size;
+@@ -290,6 +355,14 @@ module tc_controller #(
+                     if (axi_slv_req_i.w_valid) begin
+                         // 写入数据逻辑
+                         if (w_addr_match_q) begin
++                        `ifdef VERILATOR
++                            offset_bytes = w_current_addr_q - w_beat_base_addr;
++                            word_data = axi_slv_req_i.w.data[offset_bytes*8 +: 64];
++                            word_idx = (w_current_addr_q - SLV_REGISTER_ADDR) / 8;
++                            if (word_idx >= 0 && word_idx < 5) begin
++                                $display("[TensorCore] Write instruction[%0d] = 0x%016x", word_idx, word_data);
++                            end
++                        `endif
+                             for (int i = 0; i < BYTES_PER_BEAT; i++) begin
+                                 if (axi_slv_req_i.w.strb[i] && 
+                                     (w_beat_base_addr + i >= SLV_REGISTER_ADDR) && 
+@@ -337,6 +410,14 @@ module tc_controller #(
+                     if (axi_slv_req_i.w_valid) begin
+                         // 写入数据逻辑 (同上)
+                         if (w_addr_match_q) begin
++                        `ifdef VERILATOR
++                            offset_bytes = w_current_addr_q - w_beat_base_addr;
++                            word_data = axi_slv_req_i.w.data[offset_bytes*8 +: 64];
++                            word_idx = (w_current_addr_q - SLV_REGISTER_ADDR) / 8;
++                            if (word_idx >= 0 && word_idx < 5) begin
++                                $display("[TensorCore] Write instruction[%0d] = 0x%016x", word_idx, word_data);
++                            end
++                        `endif
+                             for (int i = 0; i < BYTES_PER_BEAT; i++) begin
+                                 if (axi_slv_req_i.w.strb[i] && 
+                                     (w_beat_base_addr + i >= SLV_REGISTER_ADDR) && 
+@@ -608,6 +689,18 @@ module tc_controller #(
+                 
+                 default: ctrl_state_q <= CTRL_IDLE;
+             endcase
++
++        `ifdef VERILATOR
++            if (instruction_rcvd_q) begin
++                $display("[TensorCore] Complete instruction received, executing...");
++                print_instruction();
++                instruction_rcvd_q <= 1'b0;
++                instruction_cnt_q <= instruction_cnt_q + 1'b1;
++            end
++            if (instruction_complete) begin
++                instruction_rcvd_q <= 1'b1;
++            end
++        `endif
+         end
+     end
+     
