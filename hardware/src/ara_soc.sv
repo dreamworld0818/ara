@@ -84,7 +84,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   localparam logic [63:0] UARTLength = 64'h1000;
   localparam logic [63:0] CTRLLength = 64'h1000;
   localparam logic [63:0] RRAMLength = 64'h4000_0000; //RRAM
-  localparam logic [63:0] TCLength   = 64'h1000; //Tensor Core
+  localparam logic [63:0] TCLength   = 64'h2000; // Tensor Core: 0xD000_1000..0xD000_2FFF (instruction + state)
 
   typedef enum logic [63:0] {
     DRAMBase = 64'h8000_0000, //L2 memory
@@ -630,7 +630,12 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .system_axi_r_t    (system_r_chan_t      ),
     .system_axi_w_t    (system_w_chan_t      ),
     .system_axi_req_t  (system_req_t         ),
-    .system_axi_resp_t (system_resp_t        ))
+    .system_axi_resp_t (system_resp_t        ),
+    .TcL2BaseAddr      (DRAMBase             ),
+    .TcRramBaseAddr    (RRAMBase             ),
+    .TcAInL2           (1'b1                 ),
+    .TcBInL2           (1'b1                 ),
+    .TcDinInL2         (1'b1                 ))
 `else
   ara_system
 `endif

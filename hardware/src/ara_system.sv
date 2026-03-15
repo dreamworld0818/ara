@@ -53,7 +53,13 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     parameter type                              system_axi_w_t     = logic,
     parameter type                              system_axi_b_t     = logic,
     parameter type                              system_axi_req_t   = logic,
-    parameter type                              system_axi_resp_t  = logic
+    parameter type                              system_axi_resp_t  = logic,
+    // TensorCore SoC memory bases (L2 / RRAM). SoC passes these so TC DMA hits correct region.
+    parameter logic [63:0]                       TcL2BaseAddr       = 64'h0,
+    parameter logic [63:0]                       TcRramBaseAddr    = 64'h0,
+    parameter logic                             TcAInL2            = 1'b1,
+    parameter logic                             TcBInL2            = 1'b1,
+    parameter logic                             TcDinInL2         = 1'b1
   ) (
     input  logic                    clk_i,
     input  logic                    rst_ni,
@@ -237,14 +243,24 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     .axi_resp_i      (ara_axi_resp  )
   );
 
-  tc_top i_tc_top(
+  tc_top #(
+    .L2_BASE_ADDR (TcL2BaseAddr),
+    .RRAM_BASE_ADDR(TcRramBaseAddr),
+    .A_IN_L2      (TcAInL2),
+    .B_IN_L2      (TcBInL2),
+    .DIN_IN_L2    (TcDinInL2)
+  ) i_tc_top (
     .clk_i            (clk_i                 ),
     .rst_ni           (rst_ni                ),
-    .axi_mst_req_o    (tc_mst_req        ),
-    .axi_mst_resp_i   (tc_mst_resp       ),
+    .axi_mst_req_o    (tc_mst_req            ),
+    .axi_mst_resp_i   (tc_mst_resp           ),
     .axi_slv_req_i    (axi_slv_req_i         ),
     .axi_slv_resp_o   (axi_slv_resp_o        )
   );
+
+  // Connect TensorCore AXI master to acc_mux (TC DMA must reach L2/memory for completion)
+  `AXI_ASSIGN_REQ_STRUCT(tc_axi_mst_req, tc_mst_req)
+  `AXI_ASSIGN_RESP_STRUCT(tc_mst_resp, tc_axi_mst_resp)
 
   axi_mux #(
     .SlvAxiIDWidth(AxiAccIdWidth        ),
