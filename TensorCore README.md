@@ -12,7 +12,7 @@
 
   - `hardware\tb\verilator\lowrisc_dv_verilator_memutil_dpi\cpp\dpi_memutil.cc` ：
   
-    删掉一些限制位宽的assert，调整`minbuf`数组大小适配128的width_byte。
+    删掉一些限制位宽的assert，调整`minibuf`数组大小适配128的width_byte。
 
   - `hardware\deps\tech_cells_generic\src\rtl\tc_sram.cc` :
   

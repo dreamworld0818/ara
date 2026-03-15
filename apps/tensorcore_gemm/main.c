@@ -61,7 +61,7 @@ int main() {
     inst.fields.mma_meta.info.if_B_transpose = 0;
     inst.fields.mma_meta.info.if_A_transpose = 0;
     inst.fields.mma_meta.info.instruction_type = 1;
-    send_tensorcore_instruction(&inst);
+    send_tensorcore_instruction(&inst);  
     uint64_t state = load_tensorcore_state();
     printf("tensorcore state: %016lx\n", state);
 
