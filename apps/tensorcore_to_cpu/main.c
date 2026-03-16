@@ -79,7 +79,7 @@ int main(void) {
   inst.fields.mma_meta.info.K = K_block;
   inst.fields.mma_meta.info.if_B_transpose = 0;
   inst.fields.mma_meta.info.if_A_transpose = 0;
-  inst.fields.mma_meta.info.instruction_type = 1;
+  inst.fields.mma_meta.info.instruction_type = 0;
 
   send_tensorcore_instruction(&inst);
   printf("[DEBUG] send_tensorcore_instruction completed.\n");

@@ -630,12 +630,13 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .system_axi_r_t    (system_r_chan_t      ),
     .system_axi_w_t    (system_w_chan_t      ),
     .system_axi_req_t  (system_req_t         ),
-    .system_axi_resp_t (system_resp_t        ),
-    .TcL2BaseAddr      (DRAMBase             ),
-    .TcRramBaseAddr    (RRAMBase             ),
-    .TcAInL2           (1'b1                 ),
-    .TcBInL2           (1'b1                 ),
-    .TcDinInL2         (1'b1                 ))
+    .system_axi_resp_t (system_resp_t        )
+    // .TcL2BaseAddr      (DRAMBase             ),
+    // .TcRramBaseAddr    (RRAMBase             ),
+    // .TcAInL2           (1'b1                 ),
+    // .TcBInL2           (1'b1                 ),
+    // .TcDinInL2         (1'b1                 )
+    )
 `else
   ara_system
 `endif

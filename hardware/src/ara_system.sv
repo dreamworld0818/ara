@@ -244,11 +244,11 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
   );
 
   tc_top #(
-    .L2_BASE_ADDR (TcL2BaseAddr),
-    .RRAM_BASE_ADDR(TcRramBaseAddr),
-    .A_IN_L2      (TcAInL2),
-    .B_IN_L2      (TcBInL2),
-    .DIN_IN_L2    (TcDinInL2)
+    // .L2_BASE_ADDR (TcL2BaseAddr),
+    // .RRAM_BASE_ADDR(TcRramBaseAddr),
+    // .A_IN_L2      (TcAInL2),
+    // .B_IN_L2      (TcBInL2),
+    // .DIN_IN_L2    (TcDinInL2)
   ) i_tc_top (
     .clk_i            (clk_i                 ),
     .rst_ni           (rst_ni                ),
