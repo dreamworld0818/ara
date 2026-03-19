@@ -1,56 +1,72 @@
 #!/usr/bin/env python3
 
-from ctypes import alignment
 import random as rand
-import numpy as np
 import sys
+import struct
 
 def emit(name, array, alignment='8'):
   print(".global %s" % name)
   print(".balign " + alignment)
   print("%s:" % name)
-  bs = array.tobytes()
+  # "array" here is a raw bytes object.
+  bs = array
   for i in range(0, len(bs), 4):
     s = ""
     for n in range(4):
       s += "%02x" % bs[i+3-n]
     print("    .word 0x%s" % s)
 
-def block_decomposition(matrix, block_shape=(64, 64), pad_mode='constant', pad_value=0):
-  """
-  将矩阵分解为指定形状的块
-  
-  参数:
-  - matrix: 输入矩阵
-  - block_shape: 块形状，默认为(64, 64)
-  - pad_mode: 填充模式
-  - pad_value: 填充值
-  
-  返回:
-  - 块状矩阵和填充信息
-  """
-  block_h, block_w = block_shape
-  rows, cols = matrix.shape
-  
-  # 计算需要填充的数量
-  pad_rows = (block_h - rows % block_h) % block_h
-  pad_cols = (block_w - cols % block_w) % block_w
-  
-  # 填充
-  padded = np.pad(matrix, 
-                  ((0, pad_rows), (0, pad_cols)), 
-                  mode=pad_mode, 
-                  constant_values=pad_value)
-  
-  # 计算块数量
-  n_blocks_rows = padded.shape[0] // block_h
-  n_blocks_cols = padded.shape[1] // block_w
-  
-  # 重塑
-  blocks = padded.reshape(n_blocks_rows, block_h, n_blocks_cols, block_w)
-  blocks = blocks.transpose(0, 2, 1, 3)  # (n_blocks_rows, n_blocks_cols, block_h, block_w)
-  
-  return blocks, (pad_rows, pad_cols)
+def _require_multiple_of_64(name, x):
+  if x % 64 != 0:
+    raise ValueError(f"{name} must be a multiple of 64, got {x}")
+
+def _pack_u64(x: int) -> bytes:
+  return struct.pack("<Q", int(x))
+
+def _pack_i8(x: int) -> bytes:
+  return struct.pack("<b", int(x))
+
+def _pack_i32(x: int) -> bytes:
+  return struct.pack("<i", int(x))
+
+def pack_a_tc_layout_bytes(M: int, K: int, a00: int, bm=64, bk=64) -> bytes:
+  # Layout: [M/bm, K/bk, bk, bm] => single block => order: k-major then m-minor
+  _require_multiple_of_64("M", M)
+  _require_multiple_of_64("K", K)
+  if bm != 64 or bk != 64:
+    raise ValueError(f"bm and bk must be 64, got bm={bm}, bk={bk}")
+  out = bytearray()
+  for k in range(64):
+    for m in range(64):
+      v = a00 if (m == 0 and k == 0) else 0
+      out += _pack_i8(v)
+  return bytes(out)
+
+def pack_b_tc_layout_bytes(K: int, N: int, b00: int, bn=64, bk=64) -> bytes:
+  # Layout: [N/bn, K/bk, bk, bn] => single block => order: k-major then n-minor
+  _require_multiple_of_64("K", K)
+  _require_multiple_of_64("N", N)
+  if bn != 64 or bk != 64:
+    raise ValueError(f"bn and bk must be 64, got bn={bn}, bk={bk}")
+  out = bytearray()
+  for k in range(64):
+    for n in range(64):
+      v = b00 if (k == 0 and n == 0) else 0
+      out += _pack_i8(v)
+  return bytes(out)
+
+def pack_din_dout_tc_layout_bytes(M: int, N: int, d00: int, bm=64, bn=64) -> bytes:
+  # Layout: [M/bm, N/bn, bn, bm] => single block => order: n-major then m-minor
+  _require_multiple_of_64("M", M)
+  _require_multiple_of_64("N", N)
+  if bm != 64 or bn != 64:
+    raise ValueError(f"bm and bn must be 64, got bm={bm}, bn={bn}")
+  out = bytearray()
+  for n in range(64):
+    for m in range(64):
+      v = d00 if (m == 0 and n == 0) else 0
+      out += _pack_i32(v)
+  return bytes(out)
 
 ############
 ## SCRIPT ##
@@ -65,33 +81,36 @@ else:
   print("Dout = AB + Din with A=[MxK], B=[KxN], Din=[MxN], Dout=[MxN]")
   sys.exit()
 
-input_dtype = np.int8
-acc_dtype = np.int32
+# Force a single 64x64x64 case and only populate the top-left element.
+M = 64
+N = 64
+K = 64
 
-UPPER_LIMIT = 128
-LOWER_LIMIT = -127
+# Deterministic, easy-to-check scalar case:
+# Dout(0,0) = A(0,0) * B(0,0) + Din(0,0)
+A00 = 3
+B00 = 5
+Din00 = 7
+G00 = A00 * B00 + Din00
 
-A = np.random.randint(LOWER_LIMIT, UPPER_LIMIT, size=(M, K)).astype(input_dtype)
-B = np.random.randint(LOWER_LIMIT, UPPER_LIMIT, size=(K, N)).astype(input_dtype)
-Din = np.random.randint(LOWER_LIMIT, UPPER_LIMIT, size=(M, N)).astype(acc_dtype)
-Dout = np.zeros([M, N], dtype=acc_dtype)
-# Golden result matrix
-G = np.matmul(A, B) + Din
+bm = 64
+bn = 64
+bk = 64
 
-A_blocks, A_pad = block_decomposition(A)
-B_blocks, B_pad = block_decomposition(B)
-Din_blocks, Din_pad = block_decomposition(Din)
-Dout_blocks, Dout_pad = block_decomposition(Dout)
-G_blocks, G_pad = block_decomposition(G)
+A_blocks = pack_a_tc_layout_bytes(M, K, A00, bm=bm, bk=bk)
+B_blocks = pack_b_tc_layout_bytes(K, N, B00, bn=bn, bk=bk)
+Din_blocks = pack_din_dout_tc_layout_bytes(M, N, Din00, bm=bm, bn=bn)
+Dout_blocks = pack_din_dout_tc_layout_bytes(M, N, 0, bm=bm, bn=bn)
+G_blocks = pack_din_dout_tc_layout_bytes(M, N, G00, bm=bm, bn=bn)
 # alignment
 input_balign = str(64 * 64) # 1 bytes per element
 acc_balign = str(64 * 64 * 4) # 4 bytes per element
 
 # Create the file
 print(".section .l2,\"aw\",@progbits")
-emit("M", np.array(M, dtype=np.uint64))
-emit("N", np.array(N, dtype=np.uint64))
-emit("K", np.array(K, dtype=np.uint64))
+emit("M", _pack_u64(M))
+emit("N", _pack_u64(N))
+emit("K", _pack_u64(K))
 
 emit("A", A_blocks, input_balign)
 emit("Din", Din_blocks, acc_balign)

@@ -45,4 +45,4 @@ def_args_rram_to_sram ?= "100"
 # Tensorcore GEMM size
 def_args_tensorcore_gemm ?= "127 254 127"
 # Tensorcore-to-CPU (hardware sim only) GEMM size
-def_args_tensorcore_to_cpu ?= "127 254 127"
+def_args_tensorcore_to_cpu ?= "128 256 128"
