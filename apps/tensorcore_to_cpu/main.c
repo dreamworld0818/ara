@@ -4,21 +4,15 @@
 #include "runtime.h"
 #include "util.h"
 
-#ifdef SPIKE
-#include <stdio.h>
-#elif defined ARA_LINUX
+#if defined(SPIKE) || defined(ARA_LINUX)
 #include <stdio.h>
 #else
 #include "printf.h"
 #endif
 
-// Character output abstraction:
-// - Linux/Spike: use libc putchar
-// - Baremetal: use Ara's _putchar from printf.h
+/* Input matrices (A, B, Din) go only to this file, not to the terminal. */
 #if defined(SPIKE) || defined(ARA_LINUX)
-#define TC_PUTCHAR(c) putchar((c))
-#else
-#define TC_PUTCHAR(c) _putchar((c))
+#define TC_INPUT_LOG_PATH "/home/zhoujinwei/pulp/ara/apps/tensorcore_to_cpu/main.log"
 #endif
 
 // Dout = A*B + Din, A[M×K], B[K×N], Din/Dout/G[M×N]
@@ -46,54 +40,99 @@ extern int32_t G[];
 #define BLOCK_BYTES_A  4096
 #define BLOCK_BYTES_D  16384
 
-static void print_matrix_i32(const char *tag, const int32_t *mat, uint64_t rows,
-                             uint64_t cols) {
-  // Fixed, easy-to-parse format:
-  // BEGIN_<TAG> rows=<r> cols=<c>
-  // i=<row> j=<col> idx=<flat_idx> val=<int32>
-  // ...
-  // END_<TAG>
-  printf("BEGIN_%s rows=%llu cols=%llu\n", tag, (unsigned long long)rows,
-         (unsigned long long)cols);
-  for (uint64_t i = 0; i < rows; i++) {
-    for (uint64_t j = 0; j < cols; j++) {
-      uint64_t idx = i * cols + j;  
-      printf("i=%llu j=%llu idx=%llu val=%ld\n", (unsigned long long)i,
-             (unsigned long long)j, (unsigned long long)idx,
-             (long)mat[idx]);
+/* Din/Dout/G in L2 follow TensorCore block layout (gen_data.py): n-major, m-minor.
+ * Element (m,n) => flat index idx = n * M + m — NOT C row-major (m*N+n). */
+static inline uint64_t tc_d_idx(uint64_t m, uint64_t n, uint64_t Mrows) {
+  return n * Mrows + m;
+}
+
+#if defined(SPIKE) || defined(ARA_LINUX)
+static void print_matrix_i32(FILE *out, const char *tag, const int32_t *mat,
+                             uint64_t rows, uint64_t cols) {
+  fprintf(out, "BEGIN_%s rows=%llu cols=%llu layout=n-major,m-minor idx=n*M+m "
+               "(print order: outer n, inner m)\n",
+          tag, (unsigned long long)rows, (unsigned long long)cols);
+  for (uint64_t n = 0; n < cols; n++) {
+    for (uint64_t m = 0; m < rows; m++) {
+      uint64_t idx = tc_d_idx(m, n, rows);
+      fprintf(out, "m=%llu n=%llu idx=%llu val=%ld\n", (unsigned long long)m,
+              (unsigned long long)n, (unsigned long long)idx, (long)mat[idx]);
+    }
+  }
+  fprintf(out, "END_%s\n", tag);
+}
+#endif
+
+/* Compare Dout vs G; only print entries that differ. Returns -1 if all match,
+ * else TC flat idx (n*M+m) of first mismatch. */
+static int verify_dout_print_mismatches(int32_t *dout, int32_t *gold, uint64_t rows,
+                                      uint64_t cols) {
+  int first_mismatch_idx = -1;
+  for (uint64_t n = 0; n < cols; n++) {
+    for (uint64_t m = 0; m < rows; m++) {
+      uint64_t idx = tc_d_idx(m, n, rows);
+      if (dout[idx] != gold[idx]) {
+        printf("[SW][MISMATCH] m=%llu n=%llu idx=%llu Dout=%ld G=%ld\n",
+               (unsigned long long)m, (unsigned long long)n,
+               (unsigned long long)idx, (long)dout[idx], (long)gold[idx]);
+        if (first_mismatch_idx < 0) first_mismatch_idx = (int)idx;
+      }
+    }
+  }
+  return first_mismatch_idx;
+}
+
+/* UART dump: outer n (0..cols-1), inner m (0..rows-1); idx = n*M+m. */
+static void print_matrix_i32_terminal(const char *tag, const int32_t *mat,
+                                      uint64_t rows, uint64_t cols) {
+  printf("BEGIN_%s rows=%llu cols=%llu (TC layout idx=n*M+m; print outer n, inner "
+         "m)\n",
+         tag, (unsigned long long)rows, (unsigned long long)cols);
+  for (uint64_t n = 0; n < cols; n++) {
+    for (uint64_t m = 0; m < rows; m++) {
+      uint64_t idx = tc_d_idx(m, n, rows);
+      printf("m=%llu n=%llu idx=%llu val=%ld\n", (unsigned long long)m,
+             (unsigned long long)n, (unsigned long long)idx, (long)mat[idx]);
     }
   }
   printf("END_%s\n", tag);
 }
 
-static void print_bin_u64_grouped(uint64_t v, int bits, int group_bits) {
-  if (bits <= 0 || bits > 64) bits = 64;
-  if (group_bits <= 0) group_bits = 8;
-  for (int i = bits - 1; i >= 0; --i) {
-    TC_PUTCHAR(((v >> i) & 1ULL) ? '1' : '0');
-    if (i != 0 && (i % group_bits) == 0) TC_PUTCHAR('_');
-  }
-}
-
-static int verify_matrix(int32_t *result, int32_t *gold, uint64_t rows, uint64_t cols) {
-  for (uint64_t i = 0; i < rows; i++) {
-    for (uint64_t j = 0; j < cols; j++) {
-      uint64_t idx = i * cols + j;
-      if (result[idx] != gold[idx]) {
-        return (int)(i == 0 && j == 0 ? -1 : idx);
-      }
+#if defined(SPIKE) || defined(ARA_LINUX)
+static void print_matrix_i8_k_major_m_minor(FILE *out, const char *tag,
+                                            const int8_t *mat, uint64_t rows_m,
+                                            uint64_t cols_k) {
+  // Flat layout is [k-major][m-minor], i.e., idx = k*rows_m + m.
+  fprintf(out, "BEGIN_%s rows=%llu cols=%llu layout=k-major,m-minor\n", tag,
+          (unsigned long long)rows_m, (unsigned long long)cols_k);
+  for (uint64_t m = 0; m < rows_m; m++) {
+    for (uint64_t k = 0; k < cols_k; k++) {
+      uint64_t idx = k * rows_m + m;
+      fprintf(out, "m=%llu k=%llu idx=%llu val=%d\n", (unsigned long long)m,
+              (unsigned long long)k, (unsigned long long)idx, (int)mat[idx]);
     }
   }
-  return 0;
+  fprintf(out, "END_%s\n", tag);
 }
+#endif
 
 int main(void) {
   uint32_t M_block = (uint32_t)((M + 63) / 64);
   uint32_t N_block = (uint32_t)((N + 63) / 64);
   uint32_t K_block = (uint32_t)((K + 63) / 64);
 
-  printf("[INPUT] A(0,0)=%d B(0,0)=%d Din(0,0)=%ld\n", (int)A[0], (int)B[0],
-         (long)Din[0]);
+  /* A, B, Din: only written to main.log (host path), not printed on terminal. */
+// #if defined(SPIKE) || defined(ARA_LINUX)
+//   {
+//     FILE *inlog = fopen(TC_INPUT_LOG_PATH, "w");
+//     if (inlog) {
+//       print_matrix_i8_k_major_m_minor(inlog, "A", A, M, K);
+//       print_matrix_i8_k_major_m_minor(inlog, "B", B, N, K);
+//       print_matrix_i32(inlog, "DIN", Din, M, N);
+//       fclose(inlog);
+//     }
+//   }
+// #endif
 
   // 按 FLOW_README：base_addr 为相对所在区域的字节偏移（L2 或 RRAM）
   mma_instruction_t inst = {0};
@@ -147,27 +186,14 @@ int main(void) {
   printf("TensorCore state (after poll): %llu\n", (unsigned long long)tc_state);
   __sync_synchronize(); /* ensure DMA write to Dout is visible before CPU read */
 
-  // For this debug experiment we only care about the top-left scalar.
-  // Expected: Dout(0,0) == G(0,0).
-  printf("[CHECK] Dout(0,0)=%ld, Expected G(0,0)=%ld\n", (long)Dout[0], (long)G[0]);
-  if (Dout[0] == G[0]) {
-    printf("PASS (scalar)\n");
+  int first_bad = verify_dout_print_mismatches(Dout, G, M, N);
+  /* Gold matrix for cross-check with RTL [TC][SA][DOUT_OUT] / software Dout. */
+  // print_matrix_i32_terminal("G", G, M, N);
+  // print_matrix_i32_terminal("Dout", Dout, M, N);
+  if (first_bad < 0) {
+    printf("PASS (matrix 64x64)\n");
     return 0;
   }
-  printf("FAIL (scalar)\n");
-  // print_matrix_i32("DOUT", Dout, M, N);
-  // print_matrix_i32("G", G, M, N);
-  return 1;
-
-  int err = verify_matrix(Dout, G, M, N);
-  if (err == 0) {
-    printf("PASS\n");
-    return 0;  
-  }
-  printf("FAIL (first error index: %d)\n", err);
-  // Dump matrices for Verilator-side log extraction.
-  // Keep dumps after FAIL so scripts can grep BEGIN_/END_ markers reliably.
-  // print_matrix_i32("DOUT", Dout, M, N);
-  // print_matrix_i32("G", G, M, N);
+  printf("FAIL (matrix 64x64, first error index: %d)\n", first_bad);
   return 1;
 }
