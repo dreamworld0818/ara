@@ -40,21 +40,26 @@ extern int32_t G[];
 #define BLOCK_BYTES_A  4096
 #define BLOCK_BYTES_D  16384
 
-/* Din/Dout/G in L2 follow TensorCore block layout (gen_data.py): n-major, m-minor.
- * Element (m,n) => flat index idx = n * M + m — NOT C row-major (m*N+n). */
-static inline uint64_t tc_d_idx(uint64_t m, uint64_t n, uint64_t Mrows) {
-  return n * Mrows + m;
+/* Din/Dout/G: block grid (mb,nb), then n-major inside 64×64 (RTL tc_buffer: dbg_k
+ * -> n=k/64, m=k%64). idx = (mb*Nb+nb)*4096 + (n%64)*64 + (m%64). */
+static inline uint64_t tc_d_block_idx(uint64_t m, uint64_t n, uint64_t Ncols) {
+  uint64_t mb = m / 64;
+  uint64_t nb = n / 64;
+  uint64_t Nb = (Ncols + 63) / 64;
+  uint64_t nl = n % 64;
+  uint64_t ml = m % 64;
+  return (mb * Nb + nb) * (64 * 64) + nl * 64 + ml;
 }
 
 #if defined(SPIKE) || defined(ARA_LINUX)
 static void print_matrix_i32(FILE *out, const char *tag, const int32_t *mat,
                              uint64_t rows, uint64_t cols) {
-  fprintf(out, "BEGIN_%s rows=%llu cols=%llu layout=n-major,m-minor idx=n*M+m "
-               "(print order: outer n, inner m)\n",
+  fprintf(out, "BEGIN_%s rows=%llu cols=%llu layout=TC block n-major (see "
+               "tc_d_block_idx)\n",
           tag, (unsigned long long)rows, (unsigned long long)cols);
   for (uint64_t n = 0; n < cols; n++) {
     for (uint64_t m = 0; m < rows; m++) {
-      uint64_t idx = tc_d_idx(m, n, rows);
+      uint64_t idx = tc_d_block_idx(m, n, cols);
       fprintf(out, "m=%llu n=%llu idx=%llu val=%ld\n", (unsigned long long)m,
               (unsigned long long)n, (unsigned long long)idx, (long)mat[idx]);
     }
@@ -64,13 +69,13 @@ static void print_matrix_i32(FILE *out, const char *tag, const int32_t *mat,
 #endif
 
 /* Compare Dout vs G; only print entries that differ. Returns -1 if all match,
- * else TC flat idx (n*M+m) of first mismatch. */
+ * else block-layout flat index of first mismatch. */
 static int verify_dout_print_mismatches(int32_t *dout, int32_t *gold, uint64_t rows,
                                       uint64_t cols) {
   int first_mismatch_idx = -1;
   for (uint64_t n = 0; n < cols; n++) {
     for (uint64_t m = 0; m < rows; m++) {
-      uint64_t idx = tc_d_idx(m, n, rows);
+      uint64_t idx = tc_d_block_idx(m, n, cols);
       if (dout[idx] != gold[idx]) {
         printf("[SW][MISMATCH] m=%llu n=%llu idx=%llu Dout=%ld G=%ld\n",
                (unsigned long long)m, (unsigned long long)n,
@@ -82,15 +87,14 @@ static int verify_dout_print_mismatches(int32_t *dout, int32_t *gold, uint64_t r
   return first_mismatch_idx;
 }
 
-/* UART dump: outer n (0..cols-1), inner m (0..rows-1); idx = n*M+m. */
+/* UART dump: outer n, inner m; idx = tc_d_block_idx (matches gen_data). */
 static void print_matrix_i32_terminal(const char *tag, const int32_t *mat,
                                       uint64_t rows, uint64_t cols) {
-  printf("BEGIN_%s rows=%llu cols=%llu (TC layout idx=n*M+m; print outer n, inner "
-         "m)\n",
+  printf("BEGIN_%s rows=%llu cols=%llu (TC block layout; print outer n, inner m)\n",
          tag, (unsigned long long)rows, (unsigned long long)cols);
   for (uint64_t n = 0; n < cols; n++) {
     for (uint64_t m = 0; m < rows; m++) {
-      uint64_t idx = tc_d_idx(m, n, rows);
+      uint64_t idx = tc_d_block_idx(m, n, cols);
       printf("m=%llu n=%llu idx=%llu val=%ld\n", (unsigned long long)m,
              (unsigned long long)n, (unsigned long long)idx, (long)mat[idx]);
     }
@@ -162,9 +166,12 @@ int main(void) {
   inst.fields.A.info.stride_major = BLOCK_BYTES_A;
   inst.fields.A.info.stride_minor = BLOCK_BYTES_A * K_block;
 
+  /* addr_b = base + k*stride_major + n*stride_minor (block indices); B blocks are
+   * (Kb,Nb,64,64): n runs inner, so stride_minor = one block; stride_major = N_block
+   * blocks along n then next k — same as tensorcore_gemm DATAFLOW (not K_block). */
   inst.fields.B.info.base_addr    = (uint32_t)(uintptr_t)B >> 8;
-  inst.fields.B.info.stride_major = BLOCK_BYTES_A;
-  inst.fields.B.info.stride_minor = BLOCK_BYTES_A * K_block;
+  inst.fields.B.info.stride_major = BLOCK_BYTES_A * N_block;
+  inst.fields.B.info.stride_minor = BLOCK_BYTES_A;
 
   inst.fields.mma_meta.info.M = M_block;
   inst.fields.mma_meta.info.N = N_block;
@@ -191,9 +198,11 @@ int main(void) {
   // print_matrix_i32_terminal("G", G, M, N);
   // print_matrix_i32_terminal("Dout", Dout, M, N);
   if (first_bad < 0) {
-    printf("PASS (matrix 64x64)\n");
+    printf("PASS (matrix %llu x %llu)\n", (unsigned long long)M,
+           (unsigned long long)N);
     return 0;
   }
-  printf("FAIL (matrix 64x64, first error index: %d)\n", first_bad);
+  printf("FAIL (matrix %llu x %llu, first error index: %d)\n",
+         (unsigned long long)M, (unsigned long long)N, first_bad);
   return 1;
 }

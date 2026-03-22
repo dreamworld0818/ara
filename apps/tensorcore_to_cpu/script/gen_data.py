@@ -48,46 +48,55 @@ def _matmul_add(A_mk, B_kn, Din_mn, M: int, N: int, K: int):
       G[m][n] = int(acc + Din_mn[m][n])
   return G
 
-def pack_a_tc_layout_bytes(M: int, K: int, A_mk, bm=64, bk=64) -> bytes:
-  # Layout: [M/bm, K/bk, bk, bm] => single block => order: k-major then m-minor
+def _pack_a_blocks_bytes(M: int, K: int, A_mk) -> bytes:
+  """Block grid (mb, kb) then k-major within each 64×64 — matches RTL DMA / old linear A."""
   _require_multiple_of_64("M", M)
   _require_multiple_of_64("K", K)
-  if bm != 64 or bk != 64:
-    raise ValueError(f"bm and bk must be 64, got bm={bm}, bk={bk}")
+  Mb = M // 64
+  Kb = K // 64
   out = bytearray()
-  for k in range(K):
-    for m in range(M):
-      # Flat order for A is: k-major then m-minor.
-      v = A_mk[m][k]
-      out += _pack_i8(v)
+  for mb in range(Mb):
+    for kb in range(Kb):
+      for kl in range(64):
+        for ml in range(64):
+          k = kb * 64 + kl
+          m = mb * 64 + ml
+          v = A_mk[m][k] if (m < M and k < K) else 0
+          out += _pack_i8(v)
   return bytes(out)
 
-def pack_b_tc_layout_bytes(K: int, N: int, B_kn, bn=64, bk=64) -> bytes:
-  # Layout: [N/bn, K/bk, bk, bn] => single block => order: k-major then n-minor
+def _pack_b_blocks_bytes(K: int, N: int, B_kn) -> bytes:
+  """Block grid (kb, nb) then k-major within each 64×64 (same as global k then n scan)."""
   _require_multiple_of_64("K", K)
   _require_multiple_of_64("N", N)
-  if bn != 64 or bk != 64:
-    raise ValueError(f"bn and bk must be 64, got bn={bn}, bk={bk}")
+  Kb = K // 64
+  Nb = N // 64
   out = bytearray()
-  for k in range(K):
-    for n in range(N):
-      # Flat order for B is: k-major then n-minor.
-      v = B_kn[k][n]
-      out += _pack_i8(v)
+  for kb in range(Kb):
+    for nb in range(Nb):
+      for kl in range(64):
+        for nl in range(64):
+          k = kb * 64 + kl
+          n = nb * 64 + nl
+          v = B_kn[k][n] if (k < K and n < N) else 0
+          out += _pack_i8(v)
   return bytes(out)
 
-def pack_din_dout_tc_layout_bytes(M: int, N: int, D_mn, bm=64, bn=64) -> bytes:
-  # Layout: [M/bm, N/bn, bn, bm] => single block => order: n-major then m-minor
+def _pack_mn_blocks_i32_bytes(M: int, N: int, D_mn) -> bytes:
+  """Block grid (mb, nb) then n-major within 64×64: flat idx = n*64+m (see tc_buffer VERILATOR)."""
   _require_multiple_of_64("M", M)
   _require_multiple_of_64("N", N)
-  if bm != 64 or bn != 64:
-    raise ValueError(f"bm and bn must be 64, got bm={bm}, bn={bn}")
+  Mb = M // 64
+  Nb = N // 64
   out = bytearray()
-  for n in range(N):
-    for m in range(M):
-      # Flat order for Din/Dout is: n-major then m-minor.
-      v = D_mn[m][n]
-      out += _pack_i32(v)
+  for mb in range(Mb):
+    for nb in range(Nb):
+      for nl in range(64):
+        for ml in range(64):
+          n = nb * 64 + nl
+          m = mb * 64 + ml
+          v = D_mn[m][n] if (m < M and n < N) else 0
+          out += _pack_i32(v)
   return bytes(out)
 
 ############
@@ -103,27 +112,21 @@ else:
   print("Dout = AB + Din with A=[MxK], B=[KxN], Din=[MxN], Dout=[MxN]")
   sys.exit()
 
-# Force a single 64x64x64 case.
-M = 64
-N = 64
-K = 64
+# Case (default via def_args_tensorcore_to_cpu): M=128, N=256, K=128.
+# M, N, K must be multiples of 64 (TensorCore tile size).
 
-# Deterministic full 64x64 matrices:
+# Fixed deterministic matrices (same formulas for any valid M,N,K):
 # A[MxK], B[KxN], Din[MxN], G = A*B + Din
 A_mk = _build_full_mk_matrix(M, K)
 B_kn = _build_full_kn_matrix(K, N)
 Din_mn = _build_full_mn_matrix(M, N)
 G_mn = _matmul_add(A_mk, B_kn, Din_mn, M, N, K)
 
-bm = 64
-bn = 64
-bk = 64
-
-A_blocks = pack_a_tc_layout_bytes(M, K, A_mk, bm=bm, bk=bk)
-B_blocks = pack_b_tc_layout_bytes(K, N, B_kn, bn=bn, bk=bk)
-Din_blocks = pack_din_dout_tc_layout_bytes(M, N, Din_mn, bm=bm, bn=bn)
-Dout_blocks = pack_din_dout_tc_layout_bytes(M, N, [[0 for _ in range(N)] for _ in range(M)], bm=bm, bn=bn)
-G_blocks = pack_din_dout_tc_layout_bytes(M, N, G_mn, bm=bm, bn=bn)
+A_blocks = _pack_a_blocks_bytes(M, K, A_mk)
+B_blocks = _pack_b_blocks_bytes(K, N, B_kn)
+Din_blocks = _pack_mn_blocks_i32_bytes(M, N, Din_mn)
+Dout_blocks = _pack_mn_blocks_i32_bytes(M, N, [[0 for _ in range(N)] for _ in range(M)])
+G_blocks = _pack_mn_blocks_i32_bytes(M, N, G_mn)
 # alignment
 input_balign = str(64 * 64) # 1 bytes per element
 acc_balign = str(64 * 64 * 4) # 4 bytes per element
