@@ -131,17 +131,24 @@ G_blocks = _pack_mn_blocks_i32_bytes(M, N, G_mn)
 input_balign = str(64 * 64) # 1 bytes per element
 acc_balign = str(64 * 64 * 4) # 4 bytes per element
 
+# RRAM is read-only in this test: put all input matrices in .rram.
+print(".section .rram,\"a\",@progbits")
+emit("A", A_blocks, input_balign)
+emit("B", B_blocks, input_balign)
+emit("Din", Din_blocks, acc_balign)
+
 # Create the file
 print(".section .l2,\"aw\",@progbits")
 emit("M", _pack_u64(M))
 emit("N", _pack_u64(N))
 emit("K", _pack_u64(K))
 
-emit("A", A_blocks, input_balign)
-emit("Din", Din_blocks, acc_balign)
+# emit("A", A_blocks, input_balign)
+# emit("B", B_blocks, input_balign)
+# emit("Din", Din_blocks, acc_balign)
 emit("Dout", Dout_blocks, acc_balign)
 emit("G", G_blocks, acc_balign)
+# # Case 1 (all L2)：B 也放在 .l2，便于仅硬件仿真；其他 case 需改此处为 .rram 并设 TC_B_IN_L2=0
+# print(".section .l2,\"aw\",@progbits")
+# emit("B", B_blocks, input_balign)
 
-# Case 1 (all L2)：B 也放在 .l2，便于仅硬件仿真；其他 case 需改此处为 .rram 并设 TC_B_IN_L2=0
-print(".section .l2,\"aw\",@progbits")
-emit("B", B_blocks, input_balign)

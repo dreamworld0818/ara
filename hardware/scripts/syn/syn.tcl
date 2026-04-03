@@ -35,10 +35,13 @@ check_design -unresolved
 # Synthesize the design to target library
 # -------------------------------------------------------------
 set_db syn_generic_effort $env(SYN_GENERIC_EFFORT)
-syn_generic 
+syn_generic  
 
 set_db syn_map_effort $env(SYN_MAP_EFFORT)
 syn_map 
+
+set_db syn_opt_effort $env(SYN_OPT_EFFORT)
+syn_opt
 
 # -------------------------------------------------------------
 # Write out data
