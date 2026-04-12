@@ -31,18 +31,19 @@
 #include "printf.h"
 #endif
 
-// Check the results using a threshold
+/* 打开 CHECK：标量/向量结果用 THRESHOLD 做近似相等比较 */
 #define CHECK
 
-// Sanity check to see that there are some precision differences
-// between the two algorithms
+/* SANITY_CHECK：逐元素必须 bitwise 相等（看两种实现是否完全一致，通常过不了） */
 // #define SANITY_CHECK
 
-// Sanity check to see the results
+/* PRINT_RESULTS：打印每下标上向量与标量输出的十六进制，便于细查 */
 // #define PRINT_RESULTS
 
+/* 浮点比较允许的最大绝对误差 */
 #define THRESHOLD 0.0001
 
+/* 由 gen_data.py 写入 .data：通道数、内层长度、输入与三块缓冲（对齐到 NR_LANES） */
 extern uint64_t channels;
 extern uint64_t innerSize;
 extern float i[] __attribute__((aligned(4 * NR_LANES)));
@@ -50,6 +51,7 @@ extern float buf[] __attribute__((aligned(4 * NR_LANES)));
 extern float o_s[] __attribute__((aligned(4 * NR_LANES)));
 extern float o_v[] __attribute__((aligned(4 * NR_LANES)));
 
+/* 依次跑标量与向量 Softmax，计时并可选校验 o_s 与 o_v。返回值：0 成功，非 0 有误差。 */
 int main() {
   printf("\n");
   printf("=============\n");

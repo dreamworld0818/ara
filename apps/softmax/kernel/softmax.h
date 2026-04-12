@@ -19,9 +19,19 @@
 #ifndef _SOFTMAX_H_
 #define _SOFTMAX_H_
 
+/* 标量 Softmax：沿「通道」维做 softmax，形状视作 [channels × innerSize]，对每条 inner 位置在通道上归一化。
+ * i      输入张量（展平为一维，布局与数据生成脚本一致）
+ * o      输出张量（与 i 同长度；头文件里写 const 仅为接口形式，实现中会写入）
+ * buf    临时缓冲区，长度至少 channels*innerSize，用于存每维最大值与各位置 exp 之和
+ * channels  通道数 C（softmax 沿该维聚合）
+ * innerSize  每条「横向」上的元素个数（向量化时按该长度分块处理）
+ */
 void softmax(const float *i, const float *o, const float *buf,
              uint64_t channels, uint64_t innerSize);
 
+/* 向量（RVV）Softmax：与 softmax 相同的数学与数据布局，使用 RISC-V Vector 加速。
+ * i, o, channels, innerSize 含义同上；不需要单独 buf，中间结果用向量寄存器与输出区暂存。
+ */
 void softmax_vec(const float *i, const float *o, uint64_t channels,
                  uint64_t innerSize);
 

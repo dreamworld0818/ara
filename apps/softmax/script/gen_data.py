@@ -15,13 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# arg1: vector size, arg2: filter size
+# 用法: gen_data.py <channels> <innerSize>
+# 生成链接进程序的 .data 段：channels、innerSize、输入 i 及 buf/o_s/o_v 占位（与硬件对齐宏一致）。
 
 import random as rand
 import numpy as np
 import sys
 
 def emit(name, array, alignment='8'):
+  """输出汇编符号：全局标号 name,按 alignment 对齐，把 array 逐 word 写成 .word。"""
   print(".global %s" % name)
   print(".balign " + alignment)
   print("%s:" % name)
@@ -33,6 +35,7 @@ def emit(name, array, alignment='8'):
     print("    .word 0x%s" % s)
 
 def rand_matrix(N, dtype):
+  """生成长度为 N 的随机浮点向量（用于输入 i）。"""
   return np.random.rand(N).astype(dtype)
 
 ############
@@ -46,15 +49,14 @@ else:
   print("Error. Give me two arguments: the number of channels and the inner size.")
   sys.exit()
 
-# Vector of samples
+# 展平形状 [channels, innerSize] 的随机输入
 i = rand_matrix(channels * innerSize, np.float32).astype(np.float32)
 
-# Results buffer
+# 与 main 中用途对应；汇编里 buf/o_s/o_v 用与 i 同形状的占位数据保证长度与对齐
 buf = np.zeros(channels * innerSize, dtype=np.float32)
 o_s = np.zeros(channels * innerSize, dtype=np.float32)
 o_g = np.zeros(channels * innerSize, dtype=np.float32)
 
-# Create the file
 print(".section .data,\"aw\",@progbits")
 emit("channels", np.array(channels, dtype=np.uint64))
 emit("innerSize", np.array(innerSize, dtype=np.uint64))

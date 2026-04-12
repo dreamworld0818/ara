@@ -45,4 +45,7 @@ def_args_rram_to_sram ?= "100"
 # Tensorcore GEMM size
 def_args_tensorcore_gemm ?= "127 254 127"
 # Tensorcore-to-CPU (hardware sim only) GEMM size
-def_args_tensorcore_to_cpu ?= "128 256 128"
+def_args_tensorcore_to_cpu ?= "64 128 128"
+# CPU + Vector + TensorCore Flash-Attention（与 tensorcore_to_cpu 相同：M N K，均为 64 倍数）
+# GEMM1: A[M×K]·B[K×N]；GEMM2: P[M×N]·V[N×K]。见 cpu_vector_tensorecore/script/gen_data.py
+def_args_cpu_vector_tensorecore ?= "64 128 128"
