@@ -1,18 +1,15 @@
 /**
  * Flash-Attention：TensorCore GEMM 封装 + softmax。
  *
- * Softmax 与 apps/softmax 一致：对每一行将 logits 填入连续 float 缓冲区，调用与
- * `kernel/softmax.c` 中 `softmax_vec` 相同的 RVV float32 路径（`__exp_2xf32`、vfdiv），
- * 再量化为 int8 写入 P（L2 上 A 块布局，供 GEMM2 读取）。避免双精度 `__exp_1xf64`/`vfredosum`
- * 在部分仿真环境中卡死的问题。
+ * Softmax 与 apps/softmax 一致：对每一行将 logits 填入连续 float 缓冲区，调用同目录
+ * `kernel/softmax.c` 中的 `fa_softmax_vec`（与 apps/softmax 的 softmax_vec 同算法：RVV float32、
+ * `__exp_2xf32`、vfdiv），再量化为 int8 写入 P（L2 上 A 块布局，供 GEMM2 读取）。
  */
 
 #include "flash_attention.h"
-
-#include "../../softmax/lib/exp.h"
+#include "softmax.h"
 
 #include <math.h>
-#include <riscv_vector.h>
 #include <stdint.h>
 
 #if defined(SPIKE) || defined(ARA_LINUX)
@@ -31,79 +28,37 @@
 #define NR_LANES 4
 #endif
 
-/**
- * 与 apps/softmax/kernel/softmax.c 中 `softmax_vec` 等价（供本文件内联，避免链接 softmax 子目录）。
- * 对形状 [channels × innerSize] 沿 channels 维做 softmax；Flash-Attention 每行 softmax 使用
- * channels=N、innerSize=1，即一行 N 个 logits。
- */
-static void fa_softmax_vec(const float *i, const float *o, uint64_t channels,
-                           uint64_t innerSize) {
-  volatile int temp;
-  asm volatile("vsetvli %0, zero, e32, m8, ta, ma" : "=r"(temp));
-
-  asm volatile("vmv.v.i  v0, 0");
-  asm volatile("vmv.v.i  v8, 0");
-  asm volatile("vmv.v.i v16, 0");
-  asm volatile("vmv.v.i v24, 0");
-
-  size_t avl = innerSize;
-  size_t vl;
-
-  float *_i = (float *)i;
-  float *_o = (float *)o;
-  float *__i = (float *)i;
-  float *__o = (float *)o;
-
-  vfloat32m1_t max_chunk_v;
-  vfloat32m1_t buf_chunk_v;
-  vfloat32m1_t num_chunk_v;
-  vfloat32m1_t den_chunk_v;
-  vfloat32m1_t res_chunk_v;
-
-  for (vl = __riscv_vsetvl_e32m1(avl); avl > 0; avl -= vl) {
-
-    vl = __riscv_vsetvl_e32m1(avl);
-
-    max_chunk_v = __riscv_vle32_v_f32m1(__i, vl);
-    __i += innerSize;
-    for (uint64_t ch = 1; ch < channels; ++ch) {
-      buf_chunk_v = __riscv_vle32_v_f32m1(__i, vl);
-      __i += innerSize;
-      max_chunk_v = __riscv_vfmax_vv_f32m1(max_chunk_v, buf_chunk_v, vl);
-    }
-    __i = _i;
-
-    den_chunk_v = __riscv_vfmv_v_f_f32m1(0, vl);
-    for (uint64_t ch = 0; ch < channels; ++ch) {
-      buf_chunk_v = __riscv_vle32_v_f32m1(__i, vl);
-      buf_chunk_v = __riscv_vfsub_vv_f32m1(buf_chunk_v, max_chunk_v, vl);
-      buf_chunk_v = __exp_2xf32(buf_chunk_v, vl);
-      __riscv_vse32_v_f32m1(__o, buf_chunk_v, vl);
-      den_chunk_v = __riscv_vfadd_vv_f32m1(den_chunk_v, buf_chunk_v, vl);
-      __i += innerSize;
-      __o += innerSize;
-    }
-    __i = _i;
-    __o = _o;
-
-    for (uint64_t ch = 0; ch < channels; ++ch) {
-      num_chunk_v = __riscv_vle32_v_f32m1(__o, vl);
-      res_chunk_v = __riscv_vfdiv_vv_f32m1(num_chunk_v, den_chunk_v, vl);
-      __riscv_vse32_v_f32m1(__o, res_chunk_v, vl);
-      __o += innerSize;
-    }
-    _i += vl;
-    _o += vl;
-    __i = _i;
-    __o = _o;
-  }
-}
-
 /** 行缓冲：与 apps/softmax 一致对齐到 4*NR_LANES，便于向量加载 */
 static float s_fa_row_in[FA_SOFTMAX_ROW_MAX]
     __attribute__((aligned(4 * NR_LANES)));
 static float s_fa_row_out[FA_SOFTMAX_ROW_MAX]
     __attribute__((aligned(4 * NR_LANES)));
+
+/** 调试：一行 float 的 min / max / sum 与首部若干元素。
+ *  使用 %f：apps/common 的 tiny printf 仅支持浮点的 %f，不支持 %g（会原样打出 “g” 且不取参数）。
+ */
+static void fa_dbg_print_frow(const char *stage, uint64_t row_i, uint64_t n,
+                              const float *row) {
+  if (n == 0U)
+    return;
+  float mn = row[0], mx = row[0];
+  double sum = 0.0;
+  for (uint64_t j = 0; j < n; j++) {
+    float v = row[j];
+    if (v < mn)
+      mn = v;
+    if (v > mx)
+      mx = v;
+    sum += (double)v;
+  }
+  const uint64_t head = n < 4U ? n : 4U;
+  printf("[FA][softmax][i=%llu][%s] n=%llu min=%.6f max=%.6f sum=%.8f | head:",
+         (unsigned long long)row_i, stage, (unsigned long long)n,
+         (double)mn, (double)mx, sum);
+  for (uint64_t j = 0; j < head; j++)
+    printf("%s%.6f", j ? "," : " ", (double)row[j]);
+  printf("\n");
+}
 
 uint64_t tc_d_block_idx(uint64_t m, uint64_t n, uint64_t Ncols) {
   uint64_t mb = m / 64;
@@ -122,7 +77,15 @@ uint64_t tc_a_block_idx(uint64_t m, uint64_t k, uint64_t Kdim) {
   uint64_t ml = m % 64;
   return (mb * Kb + kb) * (64 * 64) + kl * 64 + ml;
 }
-
+/**
+ * S_scores: GEMM1 的输出，D 块布局
+ * M: 矩阵 A 的行数
+ * N: 矩阵 A 的列数
+ * K_head: 每个 head 的特征维
+ * causal: 是否使用因果掩码
+ * P_packed: 输出矩阵 P 的指针
+ * causal: 是否使用因果掩码
+ */
 void fa_softmax_scores_to_p(const int32_t *S_score, uint64_t M, uint64_t N,
                             uint64_t K_head, int8_t *P_packed, uint32_t causal) {
   const float inv_sqrt_k = 1.0f / sqrtf((float)K_head);
@@ -133,7 +96,7 @@ void fa_softmax_scores_to_p(const int32_t *S_score, uint64_t M, uint64_t N,
     return;
   }
 
-  printf("[FA][softmax] 开始：与 apps/softmax 相同 softmax_vec(in,out,N,1)，"
+  printf("[FA][softmax] 开始：与 apps/softmax 相同 fa_softmax_vec(in,out,N,1)，"
          "M=%llu N=%llu K_head=%llu，P 写入 A 块布局（GEMM2 读 L2）\n",
          (unsigned long long)M, (unsigned long long)N,
          (unsigned long long)K_head);
@@ -144,6 +107,10 @@ void fa_softmax_scores_to_p(const int32_t *S_score, uint64_t M, uint64_t N,
     float *row_in = s_fa_row_in;
     float *row_out = s_fa_row_out;
 
+    printf("[FA][softmax][i=%llu] ---------- 行开始 ----------\n",
+           (unsigned long long)i);
+
+    /* 阶段1：S_score（D 块布局）→ 连续 logits：缩放 + 可选 causal */
     for (uint64_t j = 0; j < N; j++) {
       uint64_t ix = tc_d_block_idx(i, j, N);
       float v = (float)S_score[ix] * inv_sqrt_k;
@@ -151,10 +118,19 @@ void fa_softmax_scores_to_p(const int32_t *S_score, uint64_t M, uint64_t N,
         v += mask_neg;
       row_in[j] = v;
     }
+    fa_dbg_print_frow("1 logits(row_in)", i, N, row_in);
 
-    /* 与 softmax/main.c 中 softmax_vec 一致：沿通道维 N、innerSize=1 → 单行 softmax */
+    /* 阶段2：与 softmax/main.c 一致 fa_softmax_vec(in,out,N,1) → 行概率 */
+    printf("[FA][softmax][i=%llu][2 fa_softmax_vec] 调用 N=%llu inner=1\n",
+           (unsigned long long)i, (unsigned long long)N);
     fa_softmax_vec(row_in, row_out, N, 1ULL);
+    fa_dbg_print_frow("3 prob(row_out)", i, N, row_out);
 
+    /* 阶段3：prob → int8，scatter 到 P（A 块布局） */
+    int32_t qmin = 127;
+    int32_t qmax = -128;
+    int32_t head_q[4];
+    const uint64_t head_n = N < 4U ? N : 4U;
     for (uint64_t j = 0; j < N; j++) {
       float p = row_out[j] * 127.0f;
       int32_t q = (int32_t)(p + 0.5f);
@@ -162,9 +138,20 @@ void fa_softmax_scores_to_p(const int32_t *S_score, uint64_t M, uint64_t N,
         q = 127;
       if (q < -128)
         q = -128;
+      if (q < qmin)
+        qmin = q;
+      if (q > qmax)
+        qmax = q;
+      if (j < head_n)
+        head_q[j] = q;
       uint64_t pi = tc_a_block_idx(i, j, N);
       P_packed[pi] = (int8_t)q;
     }
+    printf("[FA][softmax][i=%llu][4 quant->P] qmin=%ld qmax=%ld | head int8:",
+           (unsigned long long)i, (long)qmin, (long)qmax);
+    for (uint64_t j = 0; j < head_n; j++)
+      printf("%s%ld", j ? "," : " ", (long)head_q[j]);
+    printf("\n");
   }
 
   printf("[FA][softmax] 完成：共 %llu 行，权值矩阵 P 已就绪\n",
