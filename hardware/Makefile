@@ -111,7 +111,13 @@ vlog_args += -work $(library)
 # Bender
 # Defines
 bender_defs += --define NR_LANES=$(nr_lanes) --define VLEN=$(vlen) --define ARIANE_ACCELERATOR_PORT=1
+# 设为 1 时打开 CVA6 commit PC 卡死监测（见 tb/ara_tb_verilator.sv 中 CVA6_PC_STALL_DBG）
+cva6_stall_dbg ?= 0
+ifeq ($(cva6_stall_dbg),1)
+bender_defs_veril := $(bender_defs) --define COMMON_CELLS_ASSERTS_OFF --define CVA6_PC_STALL_DBG
+else
 bender_defs_veril := $(bender_defs) --define COMMON_CELLS_ASSERTS_OFF
+endif
 # Targets
 bender_common_targs := -t rtl -t cv64a6_imafdcv_sv39 -t tech_cells_generic_include_tc_sram -t tech_cells_generic_include_tc_clk -t exclude_first_pass_decoder
 bender_targs_simc     := $(bender_common_targs) -t ara_test -t cva6_test
@@ -162,9 +168,9 @@ $(buildpath)/compile_$(config).tcl: $(config_file) Makefile ../Bender.yml $(shel
 	# Rename the file if compilation did not succeed
 	if [ `cat $(buildpath)/transcript | grep "\*\* Error" | wc -l` -ne 0 ]; then mv $(buildpath)/compile_$(config).tcl $(buildpath)/compile_$(config).tcl.ERROR; fi
 
-# Synthesis
-synpath      ?= $(buildpath)/syn
-$(synpath): $(buildpath)
+# Synthesis (Genus work dir: netlist, DB, logs, bender script; reports in $(synpath)/reports)
+synpath      ?= $(ROOT_DIR)/scripts/syn_report
+$(synpath):
 	mkdir -p $(synpath)
 
 syn-apply-patches:
@@ -184,6 +190,7 @@ export INPUT_DELAY_PS := 0.0
 export OUTPUT_DELAY_PS := 0.0
 export SYN_GENERIC_EFFORT := high
 export SYN_MAP_EFFORT := high
+export SYN_OPT_EFFORT := extreme
 export NR_LANES := $(nr_lanes)
 export VLEN := $(vlen)
 export OS_SUPPORT := 0 # 1 for OS support, 0 for no OS support

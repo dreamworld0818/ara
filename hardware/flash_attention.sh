@@ -5,7 +5,7 @@
 
 rm -rf /home/zhoujinwei/pulp/ara/hardware/build
 cd /home/zhoujinwei/pulp/ara/hardware 
-make verilate
+make verilate cva6_stall_dbg=1
 cd /home/zhoujinwei/pulp/ara/apps 
 make cpu_vector_tensorecore
 cd /home/zhoujinwei/pulp/ara/hardware 

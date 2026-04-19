@@ -8,6 +8,7 @@ read_db $env(SYN_DIR)/data/syn.db
 # Generate reports
 # -------------------------------------------------------------
 set report_dir $env(SYN_DIR)/reports
+file mkdir $report_dir
 
 report_timing > ${report_dir}/timing.rpt
 report_power -by_hierarchy -levels all > ${report_dir}/power.rpt

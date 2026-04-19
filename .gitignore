@@ -36,3 +36,14 @@ docs/build/
 docs/source/_templates/
 apps/_*
 .venv/
+*.cmd
+*_old.*
+*.s
+hardware/scripts/syn_report/syn_old
+
+# Ignore generated synthesis reports except the checked-in syn_800 reports.
+hardware/scripts/syn_report/*
+!hardware/scripts/syn_report/syn_800/
+hardware/scripts/syn_report/syn_800/*
+!hardware/scripts/syn_report/syn_800/reports/
+!hardware/scripts/syn_report/syn_800/reports/**

@@ -46,6 +46,7 @@ syn_opt
 # -------------------------------------------------------------
 # Write out data
 # -------------------------------------------------------------
+file mkdir [file join $env(SYN_DIR) data]
 write_hdl -mapped > $env(SYN_DIR)/data/$env(TOP_MODULE)-mapped.v
 write_sdf > $env(SYN_DIR)/data/$env(TOP_MODULE).sdf
 write_sdc -view setup_view > $env(SYN_DIR)/data/constraint_setup.sdc

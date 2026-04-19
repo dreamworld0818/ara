@@ -41,3 +41,88 @@ case：CPU 准备参数并调度两段 GEMM 与 softmax。
 
 ### 要求更改：
 - **softmax按照示例的方法发送指令和计算**：按照/home/zhoujinwei/pulp/ara/apps/softmax中的方式编写flash-attention的softmax阶段的函数定义和指令，取GEMM1计算后的结果S进行softmax操作后变为权值矩阵P，并且每个阶段结束之后，需要打印显示。且softmax计算之后的结果是P存入L2中，让GEMM2能够取P进行第二次tensor计算
+
+## 64*64*128卡死问题：
+### 目前现状：
+- **仿真卡死**程序卡在flash_attention的第二次GEMM2上，具体在/home/zhoujinwei/pulp/ara/apps/cpu_vector_tensorecore/main.c的fa_send_gemm函数里的send_tensorcore_instruction函数上，运行到该函数时，终端一直不会打印出[FA][%s] MMIO done, polling TC state。
+- **其他规模测试**相同的程序，改变规模为64*128*128和64*64*64均能正常执行完完整的flash_attention,终端也能正常打印出所有信息
+- **终端打印信息**目前终端打印如下：
+===  softmax 阶段结束(scores -> P) ===
+PASS checkpoint Gold_P (softmax)
+[FA] GEMM2 P*V: MMA (M,N,K)=(64,128,64)
+[FA][GEMM2_PxV] send_tensorcore_instruction: M_block=1 N_block=2 K_block=1
+[TC][DMA][AR] addr=0x000000008001c000 buf=0x4 transpose=0 len=127
+[TC][BUF_DIN][DMA-WR] bank=0 addr=0 val=0
+[TC][DMA][R0] req_addr=0x000000008001c000 buf=0x4 transpose=0 rdata[31:0]=0x00000000 rdata[7:0]=0x00
+[TC][DMA][AR] addr=0x0000000080018000 buf=0x0 transpose=0 len=31
+[TC][BUF_A][DMA-WR] bank=0 addr=0 data16=0x007f (k0=127 k1=0)
+[TC][DMA][R0] req_addr=0x0000000080018000 buf=0x0 transpose=0 rdata[31:0]=0x7c00017f rdata[7:0]=0x7f
+[TC][DMA][AR] addr=0x0000000010004000 buf=0x2 transpose=0 len=31
+[TC][BUF_B][DMA-WR] bank=0 addr=0 data16=0x06f9 (k0=-7 k1=6)
+[TC][DMA][R0] req_addr=0x0000000010004000 buf=0x2 transpose=0 rdata[31:0]=0xfffdfbf9 rdata[7:0]=0xf9
+[TC][BUF_DIN][SA-RD] bank=0 addr=0 val=0
+[TC][SA][DIN] addr=0 Din00=0
+[FA][TC][BUF_B][SA-RD] bank=0 addr=0 part=0 val=-4
+[TC][BUF_A][SA-RD] bank=0 addr=0 part=0 val=-2
+[TC][SA][AB] addr=0 A00=0 B00=0
+[TC][DMA][AR] addr=0x0000000080020000 buf=0x4 transpose=0 len=127
+[[TC][BUF_DIN][DMA-WR] bank=0 addr=0 val=0
+[TC][DMA][R0] req_addr=0x0000000080020000 buf=0x4 transpose=0 rdata[31:0]=0x00000000 rdata[7:0]=0x00
+[TC][BUF_DOUT][SA-WR] bank=0 addr=0 val=-889
+GEM[TC][BUF_DOUT][DMA-RD] dma_addr=0 word0(Dout00)=-889
+[TC][BUF_DOUT][DMA-RD] dma_addr=0 word0(Dout00)=126
+M[TC][DMA][AR] addr=0x0000000080018000 buf=0x1 transpose=0 len=31
+[TC][DMA][R0] req_addr=0x0000000080018000 buf=0x1 transpose=0 rdata[31:0]=0x7c00017f rdata[7:0]=0x7f
+[TC][DMA][AR] addr=0x0000000010005000 buf=0x3 transpose=0 len=31
+[TC][DMA][R0] req_addr=0x0000000010005000 buf=0x3 transpose=0 rdata[31:0]=0x07050301 rdata[7:0]=0x01
+[TC][BUF_DIN][SA-RD] bank=0 addr=0 val=0
+[TC][SA][DIN] addr=0 Din00=0
+[TC][BUF_DOUT][SA-WR] bank=0 addr=0 val=127
+[TC][BUF_DOUT][DMA-RD] dma_addr=0 word0(Dout00)=127
+[TC][BUF_DOUT][DMA-RD] dma_addr=0 word0(Dout00)=174
+然后一直卡在此处，没有新的打印信息
+- **函数分析**结合终端打印信息，发现GEMM2运行到send_tensorcore_instruction函数时（函数定义位于/home/zhoujinwei/pulp/ara/apps/cpu_vector_tensorecore/kernel/gemm.c），连该函数内部的所有print都没有打印，说明没有执行该函数？
+- **最新测试**在/home/zhoujinwei/pulp/ara/apps/cpu_vector_tensorecore/kernel/gemm.c的send_tensorcore_instruction函数中添加了各种printf之后能跑通
+
+void send_tensorcore_instruction(mma_instruction_t *inst) {
+  // printf("[TC-INST] send_tensorcore_instruction start\n");
+  volatile uint64_t *tensorcore_base_addr = (volatile uint64_t *)TENSORCORE_BASE_ADDR;
+  // printf("[TC-INST] send_tensorcore_instruction get tensorcore_base_addr\n");
+  uint64_t *raw64 = inst->raw64;
+  // printf("[TC-INST] send_tensorcore_instruction get raw64\n");
+  for (int i = 0; i < (int)(sizeof(mma_instruction_t) / sizeof(uint64_t)); i++) {
+    tensorcore_base_addr[i] = raw64[i];
+    // printf("[TC-INST] store word 1\n");
+    asm volatile("" ::: "memory");
+    /* After this line: MMIO word i completed (AXI B for this store). */
+    printf("[TC-INST] store word 2\n");
+    /* After this line: MMIO word i completed (AXI B for this store). */
+    printf("[TC-INST] store word 3\n");
+  }
+  __sync_synchronize();
+  // printf("[TC-INST] fence ok, send_tensorcore_instruction return\n");
+}
+
+该函数只有在添加了   
+   printf("[TC-INST] store word 2\n");
+    /* After this line: MMIO word i completed (AXI B for this store). */
+    printf("[TC-INST] store word 3\n");
+这两行代码之后，能够正常跑通完整的仿真
+
+- **初步分析** 经过debug能确定tensorcore接收指令正常、tensorcore读写矩阵数据正常，卡在send_tensorcore_instruction函数。现在需要看CPU侧具体卡在了哪条指令，编译之后，其中cva6执行的汇编指令为/home/zhoujinwei/pulp/ara/apps/bin/cpu_vector_tensorecore.dump。
+
+### 要求更改：
+- **CPU侧卡主指令定位** 打印CVA6 RTL的相关信号或者接口的信息，帮我确定cpu侧到底是卡在了哪条汇编指令处。
+
+
+
+
+
+
+
+
+
+
+
+
+
