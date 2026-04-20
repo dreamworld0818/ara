@@ -192,16 +192,16 @@ void fa_send_gemm(const char *phase_label, uint64_t M, uint64_t N, uint64_t K,
   inst.fields.mma_meta.info.if_A_transpose = 0;
   inst.fields.mma_meta.info.instruction_type = 0;
 
-  // printf("[FA][%s] send_tensorcore_instruction: M_block=%u N_block=%u K_block=%u\n",
-  //        phase_label, (unsigned)M_block, (unsigned)N_block, (unsigned)K_block);
+  printf("[FA][%s] send_tensorcore_instruction: M_block=%u N_block=%u K_block=%u\n",
+         phase_label, (unsigned)M_block, (unsigned)N_block, (unsigned)K_block);
   send_tensorcore_instruction(&inst);
-  // printf("[FA][%s] MMIO done, polling TC state\n", phase_label);
+  printf("[FA][%s] MMIO done, polling TC state\n", phase_label);
 
   uint64_t tc_state=0;
   while ((tc_state = load_tensorcore_state()) == 0) {
   }
-  // printf("[FA][%s] TensorCore 完成，state=%llu\n", phase_label,
-  //        (unsigned long long)tc_state);
+  printf("[FA][%s] TensorCore 完成，state=%llu\n", phase_label,
+         (unsigned long long)tc_state);
   __sync_synchronize();
 }
 

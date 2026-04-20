@@ -81,37 +81,37 @@ int main(void) {
          (unsigned long long)m, (unsigned long long)n, (unsigned long long)k);
   fa_send_gemm("GEMM1_QxKt", m, n, k, Q, B1, Din1, S_out);
 
-  // int bad_s = fa_verify_i32_block(S_out, Gold_S, m, n);
-  // if (bad_s >= 0) {
-  //   printf("FAIL Gold_S (GEMM1), first block idx %d\n", bad_s);
-  //   print_first_i32_mismatches(S_out, Gold_S, m, n, 4);
-  //   return 1;
-  // }
-  // printf("PASS checkpoint Gold_S (GEMM1)\n");
+  int bad_s = fa_verify_i32_block(S_out, Gold_S, m, n);
+  if (bad_s >= 0) {
+    printf("FAIL Gold_S (GEMM1), first block idx %d\n", bad_s);
+    print_first_i32_mismatches(S_out, Gold_S, m, n, 4);
+    return 1;
+  }
+  printf("PASS checkpoint Gold_S (GEMM1)\n");
 
-  // printf("=== cpu_vector_tensorecore: Flash-Attention softmax 阶段开始(scores -> P) ===\n");
-  // fa_softmax_scores_to_p(S_out, m, n, k, P_work, causal);
-  // printf("===  softmax 阶段结束(scores -> P) ===\n");
+  printf("=== cpu_vector_tensorecore: Flash-Attention softmax 阶段开始(scores -> P) ===\n");
+  fa_softmax_scores_to_p(S_out, m, n, k, P_work, causal);
+  printf("===  softmax 阶段结束(scores -> P) ===\n");
 
-  // int bad_p = fa_verify_i8_a_block(P_work, Gold_P, m, n);
-  // if (bad_p >= 0) {
-  //   printf("FAIL Gold_P (softmax), first idx %d\n", bad_p);
-  //   print_first_i8_mismatches(P_work, Gold_P, m, n, 4);
-  //   return 2;
-  // }
-  // printf("PASS checkpoint Gold_P (softmax)\n");
+  int bad_p = fa_verify_i8_a_block(P_work, Gold_P, m, n);
+  if (bad_p >= 0) {
+    printf("FAIL Gold_P (softmax), first idx %d\n", bad_p);
+    print_first_i8_mismatches(P_work, Gold_P, m, n, 4);
+    return 2;
+  }
+  printf("PASS checkpoint Gold_P (softmax)\n");
 
   /* GEMM2：P[M,N]*V[N,K]->O[M,K] ⇒ fa_send_gemm(..., M, K, N, P, V, ...) */
   printf("[FA] GEMM2 P*V: MMA (M,N,K)=(%llu,%llu,%llu)\n",
          (unsigned long long)m, (unsigned long long)k, (unsigned long long)n);
-  fa_send_gemm("GEMM2_PxV", m, k, n, S_out, V, Din2, O_out);
+  fa_send_gemm("GEMM2_PxV", m, k, n, P_work, V, Din2, O_out);
 
-  // int bad_o = fa_verify_i32_block(O_out, Gold_O, m, k);
-  // if (bad_o >= 0) {
-  //   printf("FAIL Gold_O (GEMM2), first block idx %d\n", bad_o);
-  //   print_first_i32_mismatches(O_out, Gold_O, m, k, 4);
-  //   return 3;
-  // }
+  int bad_o = fa_verify_i32_block(O_out, Gold_O, m, k);
+  if (bad_o >= 0) {
+    printf("FAIL Gold_O (GEMM2), first block idx %d\n", bad_o);
+    print_first_i32_mismatches(O_out, Gold_O, m, k, 4);
+    return 3;
+  }
   printf("PASS checkpoint Gold_O (GEMM2)\n");
 
   printf("PASS Flash-Attention end-to-end\n");
