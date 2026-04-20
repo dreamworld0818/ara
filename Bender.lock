@@ -30,10 +30,10 @@ packages:
       Git: https://github.com/pulp-platform/common_verification.git
     dependencies: []
   cva6:
-    revision: 99eac9a649001bdf5b8f9da52e0ca73d5c48db1c
+    revision: 728dfe2f2334b8f3a944973e8e35c5d61d530f1c
     version: null
     source:
-      Git: https://github.com/pulp-platform/cva6.git
+      Git: ttps://github.com/dreamworld0818/cva6.git
     dependencies:
     - axi
     - common_cells
@@ -62,7 +62,7 @@ packages:
     dependencies:
     - common_verification
   tensor-core:
-    revision: b86c76ff5dbc324ff9dfccf1ab5bb8e87b05cceb
+    revision: f6256468c609b5358c62328ef488443860f99289
     version: null
     source:
       Git: https://github.com/hahahahhha/Tensor-Core.git
